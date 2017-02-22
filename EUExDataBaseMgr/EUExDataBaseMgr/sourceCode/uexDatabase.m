@@ -25,11 +25,52 @@
 #import "uexDatabase.h"
 #import <sqlite3.h>
 #import <AppCanKit/ACEXTScope.h>
+
+
+@interface Singleton : NSObject
+{
+    dispatch_queue_t queue;
+}
++(instancetype) shareInstance ;
+@property (nonatomic,retain) dispatch_queue_t queue;
+@end
+
+
+@implementation Singleton
+@synthesize queue;
+
+static Singleton* _instance = nil;
+
++(instancetype) shareInstance
+{
+    static dispatch_once_t onceToken ;
+    dispatch_once(&onceToken, ^{
+        _instance = [[super allocWithZone:NULL] init] ;
+        _instance.queue = dispatch_queue_create([@"test" UTF8String], DISPATCH_QUEUE_SERIAL);
+    }) ;
+    
+    return _instance ;
+}
+
++(id) allocWithZone:(struct _NSZone *)zone
+{
+    return [Singleton shareInstance] ;
+}
+
+-(id) copyWithZone:(struct _NSZone *)zone
+{
+    return [Singleton shareInstance] ;
+}
+
+@end
+
+
+//------------------------
 @interface uexDatabase()
 @property (nonatomic,assign)sqlite3 *dbHandle;
 
 @property (nonatomic,strong)NSString *dbName;
-@property (nonatomic,strong)dispatch_queue_t queue;
+//@property (nonatomic,strong)dispatch_queue_t queue;
 @property (nonatomic,strong)dispatch_semaphore_t transactionLock;
 @property (nonatomic,assign)BOOL shouldRollback;
 @end
@@ -37,7 +78,8 @@
 @implementation uexDatabase
 
 
-#define UEX_DO_IN_SERIAL_QUEUE_BEGIN    dispatch_async(self.queue, ^{
+#define UEX_DO_IN_SERIAL_QUEUE_BEGIN    dispatch_async([Singleton shareInstance].queue, ^{
+
 #define UEX_DO_IN_SERIAL_QUEUE_END      });
 
 static NSString *kDatabaseFolderPath = nil;
@@ -69,7 +111,7 @@ static NSString *kDatabaseFolderPath = nil;
     if (sqlite3_open([dbPath UTF8String], &_dbHandle) == SQLITE_OK) {
         self.dbName = dbName;
         NSString *label = [@"com.appcan.uexDataBaseMgr.dbQueue." stringByAppendingString:dbName];
-        self.queue = dispatch_queue_create([label UTF8String], DISPATCH_QUEUE_SERIAL);
+        [Singleton shareInstance];
         self.transactionLock = dispatch_semaphore_create(1);
         return YES;
     }else {
@@ -86,6 +128,14 @@ static NSString *kDatabaseFolderPath = nil;
 }
 
 - (void)execSQL:(NSString *)SQL completion:(void (^)(BOOL))completion{
+    if(!_dbHandle){
+        if (completion) {
+            completion(NO);
+        }
+        return;
+    }
+    
+    
     UEX_DO_IN_SERIAL_QUEUE_BEGIN;
     char *errMsg = nil;
     int status = sqlite3_exec(_dbHandle, SQL.UTF8String, NULL, NULL, &errMsg);
@@ -171,6 +221,7 @@ static NSString *kDatabaseFolderPath = nil;
     if (sqlite3_exec(_dbHandle, "BEGIN TRANSACTION", NULL, NULL, NULL) != SQLITE_OK) {
         return;
     }
+    
     for (NSString *sql in SQLs) {
         char *errMsg = nil;
         int ret = sqlite3_exec(_dbHandle, sql.UTF8String, NULL, NULL, &errMsg);
