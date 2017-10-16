@@ -28,16 +28,14 @@
 
 
 @interface Singleton : NSObject
-{
-    dispatch_queue_t queue;
-}
+
 +(instancetype) shareInstance ;
-@property (nonatomic,retain) dispatch_queue_t queue;
+
+@property (nonatomic,retain) NSMutableDictionary *queueDic;
 @end
 
 
 @implementation Singleton
-@synthesize queue;
 
 static Singleton* _instance = nil;
 
@@ -46,7 +44,8 @@ static Singleton* _instance = nil;
     static dispatch_once_t onceToken ;
     dispatch_once(&onceToken, ^{
         _instance = [[super allocWithZone:NULL] init] ;
-        _instance.queue = dispatch_queue_create([@"test" UTF8String], DISPATCH_QUEUE_SERIAL);
+        _instance.queueDic = [[NSMutableDictionary alloc] init];
+
     }) ;
     
     return _instance ;
@@ -62,6 +61,22 @@ static Singleton* _instance = nil;
     return [Singleton shareInstance] ;
 }
 
+- (dispatch_queue_t)getQueue:(NSString *)name
+{
+    dispatch_queue_t q;
+
+    if ((q = [_queueDic objectForKey:name])) {
+        return q;
+    }
+    else
+    {
+        q = dispatch_queue_create([name UTF8String], DISPATCH_QUEUE_SERIAL);
+        [_queueDic setObject:q forKey:name];
+    }
+    
+    return q;
+}
+
 @end
 
 
@@ -70,7 +85,7 @@ static Singleton* _instance = nil;
 @property (nonatomic,assign)sqlite3 *dbHandle;
 
 @property (nonatomic,strong)NSString *dbName;
-//@property (nonatomic,strong)dispatch_queue_t queue;
+@property (nonatomic,strong)dispatch_queue_t queue;
 @property (nonatomic,strong)dispatch_semaphore_t transactionLock;
 @property (nonatomic,assign)BOOL shouldRollback;
 @end
@@ -78,14 +93,11 @@ static Singleton* _instance = nil;
 @implementation uexDatabase
 
 
-#define UEX_DO_IN_SERIAL_QUEUE_BEGIN    dispatch_async([Singleton shareInstance].queue, ^{
+#define UEX_DO_IN_SERIAL_QUEUE_BEGIN    dispatch_async(_queue, ^{
 
 #define UEX_DO_IN_SERIAL_QUEUE_END      });
 
 static NSString *kDatabaseFolderPath = nil;
-
-
-
 
 + (void)initialize{
     static dispatch_once_t onceToken;
@@ -111,7 +123,7 @@ static NSString *kDatabaseFolderPath = nil;
     if (sqlite3_open([dbPath UTF8String], &_dbHandle) == SQLITE_OK) {
         self.dbName = dbName;
         NSString *label = [@"com.appcan.uexDataBaseMgr.dbQueue." stringByAppendingString:dbName];
-        [Singleton shareInstance];
+        _queue = [[Singleton shareInstance] getQueue:label];
         self.transactionLock = dispatch_semaphore_create(1);
         return YES;
     }else {
